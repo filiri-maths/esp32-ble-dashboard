@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ESP32-DHT22 Web Bluetooth</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 16px; }
+    button { padding: 12px 16px; margin: 8px 8px 8px 0; font-size: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; margin-top: 12px; }
+    .big { font-size: 24px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <h2>ESP32-DHT22 (Web Bluetooth)</h2>
+
+  <button id="btnConnect">Connect</button>
+  <button id="btnLedOn" disabled>LED ON</button>
+  <button id="btnLedOff" disabled>LED OFF</button>
+
+  <div class="card">
+    <div>Status: <span id="status" class="mono">disconnected</span></div>
+    <div class="big">Latest: <span id="latest" class="mono">—</span></div>
+  </div>
+
+<script>
+  const SERVICE_UUID = "12345678-1234-1234-1234-1234567890ab";
+  const CHAR_NOTIFY_UUID = "12345678-1234-1234-1234-1234567890ad";
+  const CHAR_CTRL_UUID   = "12345678-1234-1234-1234-1234567890ac";
+
+  let device, server, service, notifyChar, ctrlChar;
+
+  const statusEl = document.getElementById("status");
+  const latestEl = document.getElementById("latest");
+  const btnLedOn = document.getElementById("btnLedOn");
+  const btnLedOff = document.getElementById("btnLedOff");
+
+  const dec = new TextDecoder();
+  const enc = new TextEncoder();
+
+  function setStatus(s) { statusEl.textContent = s; }
+
+  function onNotify(event) {
+    const text = dec.decode(event.target.value);
+    latestEl.textContent = text;
+  }
+
+  async function connect() {
+    try {
+      setStatus("requesting device...");
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ name: "ESP32-DHT22" }],
+        optionalServices: [SERVICE_UUID]
+      });
+
+      device.addEventListener("gattserverdisconnected", () => {
+        setStatus("disconnected");
+        btnLedOn.disabled = true;
+        btnLedOff.disabled = true;
+      });
+
+      setStatus("connecting...");
+      server = await device.gatt.connect();
+
+      setStatus("getting service...");
+      service = await server.getPrimaryService(SERVICE_UUID);
+
+      setStatus("subscribing...");
+      notifyChar = await service.getCharacteristic(CHAR_NOTIFY_UUID);
+      await notifyChar.startNotifications();
+      notifyChar.addEventListener("characteristicvaluechanged", onNotify);
+
+      ctrlChar = await service.getCharacteristic(CHAR_CTRL_UUID);
+      btnLedOn.disabled = false;
+      btnLedOff.disabled = false;
+
+      setStatus("connected ✅");
+    } catch (err) {
+      setStatus("error: " + err);
+      console.error(err);
+    }
+  }
+
+  async function writeLed(val) {
+    if (!ctrlChar) return;
+    await ctrlChar.writeValue(enc.encode(val));
+  }
+
+  document.getElementById("btnConnect").addEventListener("click", connect);
+  btnLedOn.addEventListener("click", () => writeLed("1"));
+  btnLedOff.addEventListener("click", () => writeLed("0"));
+</script>
+</body>
+</html>
